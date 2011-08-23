@@ -40,16 +40,20 @@ sub model {
 
 sub request {
     my ( $self, $path, $search, $params ) = @_;
-    my ( $token, $method ) = @$params{qw(token method)};
-    $path .= "?access_token=$token" if ($token);
+    my ( $token, $method,$headers,$parameters,$callback ) = @$params{qw(token method headers parameters callback)};
+
+    $headers = {} unless $headers;
+    $parameters = [] unless $parameters;
+
+    unshift @{$parameters}, ['access_token' => $token] if $token;
+    $path .= ( q{?} . join q{&}, ( map { $_->[0] . '=' . $_->[1] } @{$parameters} ) ) if @{$parameters};
     my $req = $self->cv;
-    http_request $method ? $method
-        : $search        ? 'post'
-        : 'get' => ( $token ? $self->api_secure : $self->api ) . $path,
-        body => $search ? encode_json($search) : undef,
-        headers    => { 'Content-type' => 'application/json' },
-        persistent => 1,
-        sub {
+
+    my $uri = ( $token ? $self->api_secure : $self->api ) . $path;
+    $search = ( $search ? encode_json($search) : undef );
+    $method = ( $search ? 'post' : 'get' ) if not $method;
+    $headers = { 'Content-type' => 'application/json' , %{$headers} };
+    $callback = sub {
         my ( $data, $headers ) = @_;
         my $content_type = $headers->{'content-type'} || '';
 
@@ -62,7 +66,15 @@ sub request {
             # Response is raw data, e.g. text/plain
             $req->send( { raw => $data } );
         }
-        };
+    } if not defined $callback;
+
+    http_request
+        $method    => $uri,
+        body       => $search,
+        headers    => $headers,
+        persistent => 1,
+        $callback;
+
     return $req;
 }
 
